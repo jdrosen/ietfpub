@@ -1,0 +1,1288 @@
+
+
+
+
+Network Working Group                                       J. Rosenberg
+Internet-Draft                                                     Five9
+Intended status: Informational                              19 July 2023
+Expires: 20 January 2024
+
+
+            Global Lookup and Discovery of Services (GLADOS)
+                     draft-rosenberg-mimi-glados-00
+
+Abstract
+
+   This document proposes a solution for the discovery problem in MIMI
+   (More Instant Messaging Interoperability).  The discovery problem is
+   the technique by which a user in one messaging provider can determine
+   the preferred messaging provider for a target user identified by an
+   email address or phone number.  The discovery problem has been the
+   subject of numerous - largely failed - standardization attempts at
+   the IETF.  This document outlines these attempts and hypothesizes the
+   reasons for their failure, using that to define a set of requirements
+   to avoid these failures in a next attempt.  The new proposed
+   solution, called Global Lookup and Discovery of Services (GLADOS), is
+   a distributed service wherein the data is stored and managed by local
+   providers that exchange routing information to facilitate a global
+   lookup capability over a flat namespace.
+
+Status of This Memo
+
+   This Internet-Draft is submitted in full conformance with the
+   provisions of BCP 78 and BCP 79.
+
+   Internet-Drafts are working documents of the Internet Engineering
+   Task Force (IETF).  Note that other groups may also distribute
+   working documents as Internet-Drafts.  The list of current Internet-
+   Drafts is at https://datatracker.ietf.org/drafts/current/.
+
+   Internet-Drafts are draft documents valid for a maximum of six months
+   and may be updated, replaced, or obsoleted by other documents at any
+   time.  It is inappropriate to use Internet-Drafts as reference
+   material or to cite them other than as "work in progress."
+
+   This Internet-Draft will expire on 20 January 2024.
+
+Copyright Notice
+
+   Copyright (c) 2023 IETF Trust and the persons identified as the
+   document authors.  All rights reserved.
+
+
+
+
+
+Rosenberg                Expires 20 January 2024                [Page 1]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   This document is subject to BCP 78 and the IETF Trust's Legal
+   Provisions Relating to IETF Documents (https://trustee.ietf.org/
+   license-info) in effect on the date of publication of this document.
+   Please review these documents carefully, as they describe your rights
+   and restrictions with respect to this document.  Code Components
+   extracted from this document must include Revised BSD License text as
+   described in Section 4.e of the Trust Legal Provisions and are
+   provided without warranty as described in the Revised BSD License.
+
+Table of Contents
+
+   1.  Introduction  . . . . . . . . . . . . . . . . . . . . . . . .   2
+   2.  Definitions . . . . . . . . . . . . . . . . . . . . . . . . .   3
+   3.  Prior Efforts . . . . . . . . . . . . . . . . . . . . . . . .   4
+   4.  Core Requirements . . . . . . . . . . . . . . . . . . . . . .   5
+   5.  GLADOS Overview . . . . . . . . . . . . . . . . . . . . . . .   6
+   6.  Glados Provider Creation  . . . . . . . . . . . . . . . . . .   8
+   7.  AP Enrollment . . . . . . . . . . . . . . . . . . . . . . . .   8
+   8.  Client API  . . . . . . . . . . . . . . . . . . . . . . . . .   9
+     8.1.  Mapping Query . . . . . . . . . . . . . . . . . . . . . .   9
+     8.2.  Mapping Creation  . . . . . . . . . . . . . . . . . . . .  12
+       8.2.1.  Mapping Exists on Other AP  . . . . . . . . . . . . .  15
+       8.2.2.  Phone Number Moves  . . . . . . . . . . . . . . . . .  15
+     8.3.  Bulk Registration . . . . . . . . . . . . . . . . . . . .  16
+   9.  GP to GP Routing Protocol . . . . . . . . . . . . . . . . . .  17
+   10. Preferences Algorithm . . . . . . . . . . . . . . . . . . . .  19
+   11. Security Considerations . . . . . . . . . . . . . . . . . . .  20
+     11.1.  Trust Model  . . . . . . . . . . . . . . . . . . . . . .  20
+     11.2.  Spam Prevention  . . . . . . . . . . . . . . . . . . . .  21
+     11.3.  Stolen AP Credentials  . . . . . . . . . . . . . . . . .  21
+   12. Informative References  . . . . . . . . . . . . . . . . . . .  22
+   Author's Address  . . . . . . . . . . . . . . . . . . . . . . . .  23
+
+1.  Introduction
+
+   The More Instant Messaging Interoperability (MIMI) working group is
+   chartered to enable federated messaging, voice, and video service
+   between application providers, such as WhatsApp, Facebook Messenger,
+   and other vendors.  The MIMI protocols cover the exchange of
+   encrypted content [I-D.ietf-mimi-content] through transfer protocols
+   [I-D.ralston-mimi-linearized-matrix].  These protocols allow a user
+   in one provider to initiate 1-1 and group messaging with a user in a
+   second provider.  The protocol requires that the originator of the
+   communication know two things about the target user - their messaging
+   provider, and a unique identifier for that user within that provider.
+   The specifications recognize that the originator will not always know
+   the provider for the target user, or the provider-specific identifier
+   for that user on that provider.  The problem is further complicated
+
+
+
+Rosenberg                Expires 20 January 2024                [Page 2]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   by the fact that a users often make use of multiple messaging
+   applications, in which case the preferences of the target user need
+   to be taken into account as well.  These preferences are even less
+   likely to be known by the originator of communications.
+
+   Rather, in many cases one user will have an email address or phone
+   number for the target user, obtained from their address book on their
+   mobile device.  Neither the phone number or email address identify
+   the messaging provider that the target user is using.  Unlike email
+   service, the domain portion of a user's email address has no bearing
+   on what messaging provider they use.  A user joe@gmail.com might be
+   using WhatsApp or iMessage, neither of which are Gmail.  Thus - the
+   core problem is - how to take one of these service independent
+   identifiers and learn the messaging service that user is using, and
+   what their identifier is on that messaging service.
+
+   The MIMI framework hypothesizes the existence of a discovery or
+   directory service to solve this problem.  The discovery service would
+   allow the originator to take a servide independent identifier for a
+   target - such as a mobile phone number or email address - and perform
+   a lookup to determine the preferred service of the target user, along
+   with their identifier within that service.
+
+   This document proposes a specific solution for the discovery service,
+   a new protocol called the Global Lookup and Discovery of Services
+   (GLADOS).  GLADOS is a distributed internet service, interconnecting
+   glados providers (GPs) for the shared global of realizing a global
+   discovery service across different geo-political boundaries.  GLADOS
+   is not meant to be directly accessed by consumers.  Rather, it is
+   accessed by communications applications operating on a user's behalf.
+
+2.  Definitions
+
+   *  Service Independent Identifier (SII): A type of identifier for a
+      user that is unique (such that an SII is associated to only a
+      single user), and independent of any specific communications
+      service.  There are two specific identifiers in this case - a
+      mobile phone number, or an email address.
+
+   *  Service Specific Identifier (SSI): A type of identifier for a user
+      that is unique (such that an SSI is associated to only a single
+      user), and achieves its uniqueness by being composed of two parts
+      - a user part, scoped to a provider of communication services, and
+      a unique identifier for the communication service provider.  In
+      some services, the user part is not globally unique across
+      services.  Examples of this case are Wire, Twitter and Skype,
+      where user handles are flat - @jdrosen2 on Twitter, for example.
+      In other services, the user part is globally unique, and
+
+
+
+Rosenberg                Expires 20 January 2024                [Page 3]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+      corresponds to the email address or mobile phone number for the
+      recipient.  Examples of this case are WhatsApp, iMessage, and
+      Facetime.
+
+   *  Personally Identifying Information (PII): Information about a
+      target user that is not unique, but can be used to facilitate a
+      search for the target user.  Typically this would be the first
+      name and/or last name of the recipient.  The search would provide
+      a list of possible matches, along with additional information,
+      such as display names and avatars, which help the initiator find
+      the specific person to which communications is desired.
+
+3.  Prior Efforts
+
+   Discovery services are far from new on the Internet.
+
+   The whois protocol, originally specified in [RFC0954] and later
+   revised by [RFC3912], was largely focused on the mapping of domain
+   names, to services associated with those domain names, and was one of
+   the first discovery services deployed on the Internet.  The DNS SRV
+   record was specified in [RFC2782] and allows a similar discovery
+   process - given a domain name, allows a querier to learn the set of
+   services, such as VOIP based on the Session Initiation Protocol (SIP)
+   [RFC3261] [RFC3263].  Whois and DNS SRV records both assumed that the
+   lookup was keyed by a domain name, and thus they were not that useful
+   for looking up an identifier that is not domain scoped, such as a
+   mobile phone number.
+
+   This was first addressed through the specification of ENUM [RFC3761]
+   in 2004.  ENUM defined the usage of DNS to lookup phone numbers, by
+   convering a phone number to a DNS name by reversing the digits and
+   adding the suffix "e164.arpa".  This allowed portions of the
+   namespace to be delegated to telco providers that owned the number
+   prefix in question.  Though technically simple to define, its
+   deployment was hampered by the challenges of establishing authority
+   for the prefixes.  It also had a network effects challenge - its
+   utility was limited until there was a critical mass of numbers in the
+   system.  It thus became hard to justify the investment of
+   contributing numbers to ENUM.  It also suffered from an incentive
+   problem - what was the business value for the telcos to participate
+   in the activity?  These challenges resulted in a failure of ENUM
+   adoption.
+
+   Another attempt was made with ViPR (Verification Involving PSTN
+   Reahability) [I-D.rosenberg-dispatch-vipr-overview]
+   [I-D.petithuguenin-vipr-pvp].  VIPR made used of a peer-to-peer
+   network based on RELOAD (Resource Location and Discovery) [RFC6940],
+   running between enterprises.  It solved the problem of authority
+
+
+
+Rosenberg                Expires 20 January 2024                [Page 4]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   problem by authorizing records based on proof of forward routability.
+   However, it had the same network effects problem as ENUM.  It also
+   addressed the incentive problem, by focusing on enterprises for which
+   bypassing the phone network would provide cost savings.  However, the
+   network effects problem proved insurmountable (amongst other
+   challenges unrelated to the protocol), and it was never widely
+   deployed.
+
+   Discovery and lookup services are now common place on the Internet
+   but are scoped entirely within large providers, such as Facebook,
+   Twitter, WhatsApp and other providers.
+
+   The MIMI discovery service requires a solution that spans across
+   providers.
+
+4.  Core Requirements
+
+   There are four key requirements:
+
+   1.  Mapping: The service must provide a way to map from a SII to a
+       SSI.
+
+   2.  Validity: The mappings provided by the service must be represent
+       the wishes of the user associated with the SII, mapping to an
+       application they are a user of, and the mapped SSI must be the
+       one associated with this user.  The core issue is one of trust,
+       and how to determine that the mappings provided by the service
+       are accurate.
+
+   3.  Critical Mass: The network effects problem is perhaps the hardest
+       to solve.  But, to be viable, any solution must be able to reach
+       a critical mass of mappings so that it becomes useful to consume,
+       and thus useful to further populate.
+
+   4.  Incentive Alignment: There must be an incentive structure which
+       motivates the population of mappings into the service, and for
+       the consumption of those mappings.
+
+   Beyond these, there are many other requirements related to security
+   and information privacy.
+
+
+
+
+
+
+
+
+
+
+
+Rosenberg                Expires 20 January 2024                [Page 5]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+5.  GLADOS Overview
+
+   Global Lookup and Discovery of Services (GLADOS) is a distributed
+   system that provides the needed mapping function.  It is composed of
+   a set of glados providers (GP), each of which hold mappings for a
+   subset of the phone numbers and email addresses in the system
+   overall.  The GPs provide services to application providers (AP).
+   The APs are the entities that provide messaging services to end
+   users.  The APs would be services like Facebook Messenger or iMessage
+   - the same ones that would participate in the MIMI protocols.  The
+   set of APIs between APs and a GP is called the glados client api.
+
+   Why multiple GPs?  The main rationale is to enable these to be
+   created nationally, with each nation state nominating one (or more)
+   GPs to handle AP's within its jurisdiction.  Since each GP stores
+   Personally Identifiable Information (PII), this allows for PII
+   information to be stored only within a specific country or region, a
+   requirement of regulations like the General Data Protection
+   Regulation (GDPR).  It also solves for the likely problems in getting
+   everyone to agree on a single provider to use.  Glados allows
+   competitive models, where different vendors offer services, and
+   customers (in this case, the APs) can pick which one to purchase from
+   without breaking interconnectivity.
+
+   The glados client api is not accessed directly by consumers.
+   Instead, it is accessed indirectly - via the APs.  The client API
+   provides three functions:
+
+   1.  Mapping query - by which an AP provides an SII and the GP returns
+       the preferred SSI
+   2.  Bulk registration of mappings from an AP to the GP
+   3.  Mapping creation via forward routability of emails and/or SMS
+
+   A high level view of the relationship between AP, GP and end user is
+   shown below.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Rosenberg                Expires 20 January 2024                [Page 6]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+               +--------+
+               |   GP   |
+               +--------+
+                    |
+         +----------+----------+
+         |          |          |
+    +--------+ +--------+ +--------+
+    |  App   | |  App   | |  App   |
+    |Provider| |Provider| |Provider|
+    |   1    | |   2    | |   3    |
+    +--------+ +--------+ +--------+
+     |      |    |   |     |      |
+     |      +----+   |     |      |
+     |      |        |     |      |
+   +----+ +----+  +----+  +----+ +----+
+   |User| |User|  |User|  |User| |User|
+   |  1 | | 2  |  | 3  |  | 4  | | 5  |
+   +----+ +----+  +----+  +----+ +----+
+
+                       Figure 1: GLADOS Relationships
+
+   An app provider is only ever associated with a single GP.  An end
+   user however can be assocated with multiple app providers.  This
+   means that, in turn, information about such a user may be present
+   across multiple GP.  User two in the above picture is associated with
+   two distinct APs (AP1 and AP2) which in this case are both using the
+   same GP.
+
+   The end users never see glados.  No end user has an account on it;
+   they dont see it as a brand or know of it.  It is rather a service
+   largely invisible to end users, similar to the DNS.
+
+   The entities that access glados are application providers.  Through
+   an enrollment process, an app provider obtains authorization to
+   access glados for mappings, and to register mappings through either
+   the bulk API or the mapping creation API.  As part of this process,
+   an OAuth ClientID and secret are generated, and provided to the app
+   provider.  The app provider can uses these to obtain access tokens
+   needed for accessing the glados APIs.  Glados APIs are accessed via
+   server-to-server communications, and make use of mutual TLS to
+   provide an additional layer of authentication as well as ensuring
+   that the glados client ID, secret and access tokens remain on the
+   AP's servers and dont make their way to the clients provided by the
+   APs.
+
+   Through the bulk registration and mapping creation APIs, each GP will
+   build up a set of mappings.  However, each GP will only have a
+   portion of the overall set of mappings.  Consequently, when an AP
+
+
+
+Rosenberg                Expires 20 January 2024                [Page 7]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   performs a query against its GP for a given SII, that GP may or may
+   not have a mapping for that SII.  If it does not, the GP will need to
+   identify which of the other GPs might have the mapping.  To
+   facilitate that, the GPs run a protocol between them which exchanges
+   routing information it the form of a bloom filter.  The bloom filters
+   - updated continuously via the protocols described below - allow one
+   GP to know definitively that another GP does NOT contain mapping
+   information for an SII.  Consequently, when it receives a query from
+   an AP, it creates its own query to all of the other GPs whose bloom
+   filters indicate that a mapping might exist on the GP.  The results
+   are collected by the originating GP and returned to the inquiring AP.
+
+6.  Glados Provider Creation
+
+   In this architecture, the GPs are highly trusted entities.  They
+   maintain the authoritative mappings of SII to SSI from the APs.  A
+   malicious GP would be destructive to the overall process.  It could
+   provide false mappings, resulting in connection requests getting
+   routed to the wrong place.  Though MLS - and in particular secure
+   identity - prevents eavesdropping on messages - a malicious GP can
+   cause a DoS attack by black-holing connection requests.  Using DNS as
+   an analogy - the GPs are similar to the root zone providers.  You
+   dont want just anyone to be running them.
+
+   This document proposes a model wherein each nation state formally
+   nominates one or more GPs to serve APs residing in its jurisdiction.
+   A single GP can serve multiple nation states, and a nation state can
+   choose multiple GP.  The selected GP for each nation state would be
+   public information, made available through normal governmental
+   communications and publications.  Consequently, the proposal here is
+   that there is NOT an actual discovery protocol for finding the set of
+   GP in the world.  Rather, they are just well known.
+
+   Furthermore, this structure enables GPs to selectively connect with
+   each other.  In many ways this is a negative feature - as it will
+   worsen global interconnectedness of messaging.  However, it is a
+   recognition of the nationalistic political landscape that is the
+   current reality.
+
+   This section is perhaps the most contentious part of this document.
+   Fortunately, decisions on who the GP are on how they are discovered
+   are completely orthogonal to the rest of the protocol and can be
+   changed independently.
+
+7.  AP Enrollment
+
+   An application provider that wishes to participate in the mimi
+   federation enrolls with a GP.
+
+
+
+Rosenberg                Expires 20 January 2024                [Page 8]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   This enrollment is a manual process, and as part of it, the glados
+   provider will provide a series of audit and validation steps to make
+   sure the app provider is legitimate.  This validation process would
+   involve verifying that the app provider is a legitimate business,
+   verifying that their applications are available to consumers on
+   mobile platforms and/or web, validating that the application is
+   indeed a messaging app by creating an account and using it, verifying
+   that it has other users and has reasonable reviews and ratings within
+   app stores.  Most importantly, it will try to validate that the
+   application provider is not a source of spam.  The GP would define
+   these processes, and they would be made publically available to all.
+
+   Why are these checks needed?
+
+   The main problem they are trying to solve, is to reduce the risk of
+   the mapping APIs being used for malicious purposes, including spam.
+   Once fully populated, the glados database will contain entries for a
+   significant percentage of the users on the planet, indicating what
+   providers they are using for various communications services.  This
+   is valuable information, and could be used for ill.  For example, a
+   malicious provider might iterate through the mapping APIs using
+   databases of user email addresses and phone numbers, to build its own
+   directory of users and what apps they are on.  It might then send
+   those users spam messages on the various providers.  Validating the
+   app providers is one way this is prevented.
+
+   Once glados has approved the application vendor, they are provided a
+   traditional OAuth ClientID and Secret, which can be used to obtain
+   access tokens for using the glados APIs.
+
+8.  Client API
+
+8.1.  Mapping Query
+
+   The mapping Query API is a simple REST API that takes, as input, an
+   SII for a target user.  The AP sends it to its own GP - called the
+   home GP.  The home GP will authorize the request as coming from a
+   valid AP.  Once authorized, it returns the preferred SSI for the
+   user.  To do that, a multi-step lookup process is performed.
+
+   First, the home GP consults its own local set of mappings.  If the
+   mapping exists, it next examines the routing tables built from the
+   inter-GP protocols described below.  Through those protocols, each GP
+   will basically have a boolean value for each SII which says whether
+   that SII might exist, or definitively does not exist, on another GP.
+   If the home GP finds that the SII definitively does NOT exist on
+   another GP - called remote GPs - and it has a mapping of its own - it
+   returns the mapped SSI.  This is the simplest case.
+
+
+
+Rosenberg                Expires 20 January 2024                [Page 9]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   A different case is also one in which the home GP does not have a
+   mapping for the SII.  However, its routing tables indicate one or
+   more remote GPs might have the mapping.  It performs a query to each
+   of those remote GP, providing the SII in question.  The remote GP
+   authorize the request as coming from another GP, and consult only
+   their local mappings when receiving this mapping query.  Each remote
+   GP with a match, returns the result to the home GP.  In the simplest
+   case, there would be zero or one matches.  If it is zero, it means
+   that the target user doesnt exist in glados, and that fact is
+   returned to the AP.  If it is one, it means the target user does
+   exist, and the SSI from the remote GP is returned to the AP.  In the
+   case of two or more matches, it means that the user might have used
+   multiple applications.  Each mapping contains a timestamp, and the
+   most recent result is used.  This is part of the distributed
+   preferences algorithm described below.
+
+   In the same way, in the case where the home GP has the mapping, it
+   still needs to consult its routing table to see if the mapping might
+   exist on a remote GP.  If it finds a match in a remote GP, it
+   compares the timestamp from the remote GP to its own, and uses the
+   most recent.
+
+   A sequence diagram for this is shown below.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Rosenberg                Expires 20 January 2024               [Page 10]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+     ┌──┐          ┌───────┐          ┌──────────┐          ┌──────────┐
+     │AP│          │Home GP│          │Remote GP1│          │Remote GP2│
+     └┬─┘          └───┬───┘          └────┬─────┘          └────┬─────┘
+      │   query SII    │                   │                     │
+      │ ──────────────>│                   │                     │
+      │                │                   │                     │
+      │                │ ╔═════════════════╧════╗                │
+      │                │ ║local+routing lookup ░║                │
+      │                │ ╚═════════════════╤════╝                │
+      │                │    query SII      │                     │
+      │                │──────────────────>│                     │
+      │                │                   │                     │
+      │                │                   │  ╔══════════════╗   │
+      │                │                   │  ║local lookup ░║   │
+      │                │                   │  ╚══════════════╝   │
+      │                │  return result    │                     │
+      │                │<──────────────────│                     │
+      │                │                   │                     │
+      │                │               query SII                 │
+      │                │────────────────────────────────────────>│
+      │                │                   │                     │
+      │                │                   │                     │  ╔══════════════╗
+      │                │                   │                     │  ║local lookup ░║
+      │                │                   │                     │  ╚══════════════╝
+      │                │             return result               │
+      │                │<────────────────────────────────────────│
+      │                │                   │                     │
+      │ return result  │                   │                     │
+      │ <──────────────│                   │                     │
+     ┌┴─┐          ┌───┴───┐          ┌────┴─────┐          ┌────┴─────┐
+     │AP│          │Home GP│          │Remote GP1│          │Remote GP2│
+     └──┘          └───────┘          └──────────┘          └──────────┘
+
+                       Figure 2: Mapping Query
+
+   A key requirement for glados is that the GP will impose rate controls
+   to help prevent against the APIs being used maliciously.  The GP
+   knows, for any AP, how many users the AP has, because that AP will
+   have to register its own users as described below.  With knowledge of
+   how many users the AP has, along with statistics on the typical
+   number of messages sent between providers (and thus the number of
+   mapping requests typically made), the GP can dynamically create
+   reasonable rate limits to make sure that the volume of mapping API
+   requests is reasonable for the provider.  This is a second way in
+   which glados prevents the mapping APIs being used for malicious
+   purposes.
+
+
+
+
+
+Rosenberg                Expires 20 January 2024               [Page 11]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   Note that the mapping query API is not an enumeration API.  It is not
+   possible for an AP to list users.  It requires the SII to be
+   provided, and for that SII, it returns the mapped SSI.  It is also
+   important to note that the mapping query API is not a batch API
+   either; it is one mapping request at a time.  All of these help
+   mitigate against spam and enumeration attacks.
+
+8.2.  Mapping Creation
+
+   The primary way in which mappings are created in glados are created,
+   is via the mapping creation flow.  This flow is shown below:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Rosenberg                Expires 20 January 2024               [Page 12]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   +-------+                   +-----------+       +---------+
+   | user  |                   |    AP     |       |   GP    |
+   +-------+                   +-----------+       +---------+
+       |                             |                  |
+       | access app                  |                  |
+       |---------------------------->|                  |
+       |                             |                  |
+       |       enter email or number |                  |
+       |<----------------------------|                  |
+       |                             |                  |
+       | SII                         |                  |
+       |---------------------------->|                  |
+       |                             | ---------------\ |
+       |                             |-| create unique| |
+       |                             | | userID       | |
+       |                             | |--------------| |
+       |                             |                  |
+       |                             | create map(      |
+       |                             |  userID, SII)    |
+       |                             |----------------->|
+       |                             |                  |
+       |                             |   email or SMS   |
+       |                             |   with code      |
+       |<-----------------------------------------------|
+       |                             |                  |
+       | enter code                  |                  |
+       |---------------------------->|                  |
+       |                             |                  |
+       |                             | validation code  |
+       |                             |----------------->|
+       |                             |                  | ----------\
+       |                             |                  |-| store   |
+       |                             |                  | |---------|
+       |                             |                  |
+       |                             | registered       |
+       |                             |<-----------------|
+       |                             |                  |
+
+                        Figure 3: Mapping Operation
+
+
+
+
+
+
+
+
+
+
+
+
+Rosenberg                Expires 20 January 2024               [Page 13]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   The mapping operation is best understood by considering the case of a
+   brand new user creating an account on the AP.  As part of the new
+   user onboarding process in the app, the user will be prompted to
+   enter their email or mobile number.  The AP can choose whether to
+   request email or phone number or both, as a matter of provider policy
+   and design.  This is something users are already used to doing as
+   part of application onboarding.  The flow described here replaces
+   that flow, with one performed via glados instead whatever SMS or
+   email provider the application provider would have used previously.
+
+   The AP will create its own unique ID for the user, scoped within its
+   own application.  This ID need only be unique within the application
+   provider.  Once the application provider has collected the SII and
+   generated this ID - they are sent to its GP.  Using the acccess
+   token, glados will know who the application provider is, and thus be
+   able to construct the SSI by combining the provider userID, with the
+   providerID implied by the access token.
+
+   Glados will then construct a short lived code, and either email or
+   SMS it to the user.  THe user will receive this text or email, and
+   then copy the code into the app.  It is important for the security of
+   this solution that the AP - who is only partially trusted here - does
+   not know this prior to the user entering it.  Once the user has
+   entered the code, the AP invokes another API on its GP, providing the
+   code along with the userID provided previously.  The GP matches the
+   code with what it had previously sent.  If there is a match, it
+   considers the mapping validated, and stores it.  It informs the app
+   provider that the code has been confirmed.  This allows the app
+   provider to retain its own mapping too, as they do today.
+
+   This flow is meant to protect against a malicious AP trying to
+   register mappings that do not actually correspond to their own users.
+   Consider a malicious AP who makes up a set of userIDs, and then tries
+   to register made-up phone numbers or email addresses for those users.
+   They might do this in order to steal messaging or calls targeted to
+   users with those numbers or emails.  Consider for example, a
+   malicious provider that tries to register the emails of wealthy CEOs
+   or political leaders, in order to receive messages targeted for them.
+   Should a malicious provider do this, glados will send en email or SMS
+   to that user with the code.  The malicious provider does not have
+   that code, and thus would not be able to complete the mapping
+   creation operation.
+
+   There are several subcases worth considering.
+
+
+
+
+
+
+
+Rosenberg                Expires 20 January 2024               [Page 14]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+8.2.1.  Mapping Exists on Other AP
+
+   Consider the case where AP 1 establishes a mapping for an SII, but a
+   mapping already exists for that SII on a different AP, AP2.
+
+   In that case, glados needs to establish a preference, including
+   termination of the prior mapping.  To facilitate that, in the
+   response provided to the new AP - AP2 - it will include an indication
+   that there is already a mapping in the old provider AP1, and include
+   that provider ID and name.  The new provider would then render to the
+   end user a choice - whether to invalidate the prior mapping, or to
+   keep it and make this new application the preferred one.  Using
+   another REST API call, the new provider can then instruct its GP to
+   delete the old mapping or make the new one the preferred choice.
+   This is described in more detail in the section on the Preferences
+   algorithm.
+
+   Through a webhook, the old provider AP1 will be notified that the
+   mapping has been removed and/or preference established for the new
+   provider.  This will allow the old provider to update there
+   databases, and also inform the user of this change in the old
+   application.
+
+   The notification in the old application also helps deal with the case
+   of a malicious AP that always promotes its own app as the preferred
+   app and/or removes the old mapping, against the user's wishes.  The
+   old AP will be notified, and this can be shown to the user.  If done
+   malicisously, the user can request their old app to re-establish the
+   mapping, change the preference back, or to report the change as
+   malicious.  All of those operations would be available to the old AP
+   via API.  In the case where the user reports the change as malicious,
+   this would be a strike against the reputation of the new provider.
+   With sufficient strikes, the GP can further rate limit that provider
+   or remove their access entirely.
+
+8.2.2.  Phone Number Moves
+
+   In this case, user A had a particular phone number, and a
+   registration was made using their app provider AP1.  User A then
+   gives up this phone number, and a few months later, it is allocated
+   to user B.  User B goes and enters this same phone number - with
+   either the same or a different AP.
+
+   In practice, this case is indistinguishable from the prior one.  User
+   B would see, in the UI of their app, that a previous registration
+   exists for a different provider.  They would then select the option
+   to remove that old mapping for user A.
+
+
+
+
+Rosenberg                Expires 20 January 2024               [Page 15]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   At the point where user B has obtained the number from their telco,
+   and begun to give it out to friends and family, but has NOT used it
+   with any messaging application, new contact requests for that number
+   will continue to be delivered to user A via their current
+   application.  This is definitely not a good thing, and is one of the
+   main limitations of this proposal.  It can be somewhat remediated by
+   periodic refresh of the mapping, but this is bothersome to users and
+   is not current practice.
+
+   That said, this same limitation exists within existing messaging
+   providers.  Glados doesnt make the problem worse, but it doesnt make
+   it better.
+
+8.3.  Bulk Registration
+
+   A key problem that glados needs to solve is the network effect
+   problem.  The mapping creation API above works well, but if we were
+   to depend on that, glados would begin day one with zero phone
+   numbers.
+
+   To resolve this, glados will provide a bulk API that allows selected
+   AP to upload mappings, and the GP will just trust them without
+   sending confirmation emails or SMS messages.  This API would be made
+   available selectively, only to the handful of known, large providers
+   - Facebook Messenger, WhatsApp, iMessage - and perhaps that's it.
+   With just those three, glados would have critical mass of mappings to
+   bootstrap the ongoing registration process described above, which
+   would be used by all of the other smaller providers and smaller GP
+   too.
+
+   The bulk registration process provides full trust in the AP, that
+   they are only registering numbers and email addresses that they have
+   actually verified.  This is why it can only be done with the handful
+   of highly known vendors.
+
+   The final piece of the puzzle is incentive.  What is the incentive
+   for the largest AP to do this?  They are, in essence, giving up their
+   crown jewels - a set of validated phone numbers and emails.  The
+   answer is the same as mimi as a whole.  They would be compelled to do
+   so through the regulatory actions of the EU or other bodies.  WIthout
+   that, it is unlikely that this proposal would work.
+
+
+
+
+
+
+
+
+
+
+Rosenberg                Expires 20 January 2024               [Page 16]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+9.  GP to GP Routing Protocol
+
+   A key problem to solve, is how one GP can find which other GP to
+   query, when resolving a mapping.  One solution is to just do a
+   broadcast query - send the request to all of the other GP.  This
+   presents a scale challenge however.  The smallest GP - one
+   representing a small country - would need to process a large volume
+   of requests, the vast majority of which are for users outside of its
+   jurisdiction.
+
+   A somewhat better approach is to perform a broadcast but then cache
+   negative responses.  This only partially mitigates the volume
+   problem, and then relies on a timeout of the negative cache entry.
+   The usage of the negative caching breaks an important user flow - a
+   user signs up for an app, informs their friends out of band, and then
+   their friends send connection requests.  With the negative cache,
+   those connection requests will not flow to the user on their new
+   application.  This is an unacceptable user experience.
+
+   To solve this, glados provides a form of routing protocol, allowing
+   each GP to inform the other GP about what mappings it might hold.
+   Because we are worried about storing PII only within a target
+   country, glados makes use of a bloom filter to exchange this
+   information.
+
+   The basic idea is the following.
+
+   Each GP has a set of mappings, those mappings being from an SII to an
+   SSI.  Each mapping also includes a timestamp.  On a periodic basis,
+   every night or every week perhaps, the GP constructs a fresh bloom
+   filter from its mappings.  A bloom filter of size 2^N is created and
+   initialized as empty.  To add entries into this bloom filter, each
+   SII is hashed using a crypto hash.  Of the results, the lowest N bits
+   are selected.  The corresponding bit in the bloom filter is set to a
+   one.  Each bloom filter has a timestamp, corresponding to the time of
+   creation on the GP.
+
+   Each GP provides an API by which the most recent bloom filter can be
+   retrieved.  It can easily be encoded as a binary object of size
+   2^()N/8 bytes.  Since it is large, it would only be retrieved
+   infrequently.  Indeed, this is the reason they are versioned.  Other
+   GPs can subscribe to additions (but not removals) from that bloom
+   filter.
+
+   To support this, when a GP gets a new mapping as described above (via
+   the bulk registration or mapping creation API), it performs the hash
+   over the SII, takes the lower N bits and sets the corresponding bit
+   in the bloom filter to a 1.  Of course, mappings can also be removed
+
+
+
+Rosenberg                Expires 20 January 2024               [Page 17]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   by a GP.  However, removing an entry from the bloom filter
+   incrementally is impossible without completely recomputing it.
+   Because this is likely to be a slow and expensive process, removals
+   are not performed incrementally, only additions.
+
+   If the addition of a new SII causes an entry in the bloom filter to
+   flip from a zero to a one, a notification is sent via webhook to any
+   GP that has subscribed.  These subscriptions are to a particular
+   version of the bloom filter.  When a subscription is created, it also
+   includes a timestamp.  The GP will send all changes (which are always
+   transitions in the bloom filter from a zero to a one) since that
+   timestamp.  This allows a GP to "catch up" on changes it may have
+   missed when disconnected.
+
+   After some period of time - a day or a week perhaps - the old bloom
+   filter is considered sufficiently dirty and is invalidated.  A new
+   bloom filter is constructed.  Any subscriptions to the old one are
+   terminated, and the other GPs need to fetch the newest one and
+   recreate their subscriptions to receive changes against it.
+
+   Bloom filters work really well for this case because there is always
+   going to be a query from a home GP to a remote GP to check if the
+   mapping actually exists.  Thus, if the bloom filter has a "1" but its
+   really a "0", the penalty is a wasted query, but no incorrect
+   information.
+
+   The use of the subscriptions ensure that - if a new user does sign up
+   - that fact is immediately propagated to the other GPs.  This
+   addresses the user experience issue that would otherwise exist with a
+   negative cache that times out.
+
+   There are two key parameters this algorithm that need to be tuned -
+   the value of N, and the frequency by which the bloom filter is
+   refreshed.
+
+   The value of N is a tradeoff between space efficiency of the
+   encoding, and the volume of traffic that the GP will receive.  On one
+   exteme, if N=1 then the system behaves as if there were no filters at
+   all - every query to any other GP will trigger a query to it.  This
+   is exactly the traffic problem we are trying to fix.  On the other
+   extreme, if a GP has K SIIs in the system, setting N = 2 * log(K)
+   means that every user is almost certainly mapped to a different bit
+   in the bloom filter.  Thus, the useful range for any GP is somewhere
+   between 1.. 2*log(K).  This spec proposes that each GP can pick
+   whatever value they want for N.  However, we should surely propose
+   guidelines which are going to work well.
+
+
+
+
+
+Rosenberg                Expires 20 January 2024               [Page 18]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   The second tunable parameter is the frequency by which the bloom
+   filter is refreshed.  This depends on the rate at which mappings are
+   deleted relative to the size of the bloom filter.  Some modeling work
+   is needed to come up with good suggestions on how to tune this value.
+
+10.  Preferences Algorithm
+
+   Glados makes an assumption that, at any given time, a user can have a
+   single preferred app provider.  This preferred app provider is the
+   one which will receive connection requests from users on different
+   app providers.
+
+   When a user has multiple apps, they are given the choice about which
+   one is their preferred provider.  The basic algorithm for doing this
+   is simple.  When the user utilizes a first application, that
+   application is automatically preferred.  SHould the same user (as
+   identified by their SII) utilize a second application, the user is
+   informed that they have already created a preference for the first
+   one.  They have the choice to make the new app their preferred one,
+   or keep the old one.  If they choose the new one, their new AP asks
+   the GP to delete the old mapping.  When the old mapping is deleted,
+   the old AP is informed and they can pass this information on to the
+   user in the old UI.
+
+   This approach for preference management avoids the need for there to
+   be a single place that holds the users preferences across multiple
+   APs or GPs, which is critical in a distributed system.
+
+   Since glados only partially trusts the APs, a key part of the
+   security of this solution is informing the old AP when a user
+   indicates a preference for the new AP.  If the new AP is a malicious
+   provider, and creates this preference without user consent, but the
+   old AP is not malicious, the old AP can inform the user that this
+   preference change has happened, and the user can take action.  This
+   is very similar to the email notifications users receive today when
+   there is a change to some kind of configuration on their accounts.
+
+   The key to making this work is the propagation of the mapping
+   deletion action back to the old AP.
+
+
+
+
+
+
+
+
+
+
+
+
+Rosenberg                Expires 20 January 2024               [Page 19]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   If the old AP and new AP are on the same GP, this is done via a
+   webhook callback to the old AP.  If the old and new AP are on
+   different GP, we dont want to just broadcast the removal.  Instead,
+   the GP of the new AP looks into its routing filters to see if any
+   other GP might own a mapping for the SII which has changed.  If it
+   finds a match, it sends a webhook callback to those GP, indicating
+   that that particular SII has been claimed.  (NOTE: I dont love this.
+   This will cause PII to flow to other GP even if it may not need to,
+   owing to the bloom filters.  Still pondering alternatives.)
+
+11.  Security Considerations
+
+   Security is paramount and is at the center of this proposal.
+
+11.1.  Trust Model
+
+   There is a three tier trust model which is assumed by glados.
+
+   FIrst - are end users.  They are completely untrusted and not even
+   first class actors in glados.
+
+   Second - are APs.  In glados, they are partially trusted.  Glados
+   trusts only a few of them to create bulk mappings, but in general, it
+   does not trust them to claim ownership of an SII.  This is why the GP
+   validates the mapping via traditional forward routability.  Glados
+   partially trusts them to express user preferences correctly, via a
+   "trust but verify" type of model.  It trusts them to correctly convey
+   short term validation codes from end users, rather than dropping them
+   or changing them.  Should a malicious AP do that, it only hurts their
+   own end user, who will not receive incoming communications from other
+   users outside of that AP.
+
+   Finally - are the GPs.  In Glados, these are fully trusted.  This is
+   why it is necessary to have some kind of procedure for formalizing
+   the creation of GPs.  In this document, it is proposed to be done by
+   national selection processes.  This is similar to what is done with
+   STIR/SHAKEN, and we might look at reusing some of its policy
+   solutions.  We also propose the usage of a nation-state model for
+   creating GPs, in order to allow localized decision making on which
+   other state actors to trust, or not trust (feature or bug, you
+   decide).
+
+
+
+
+
+
+
+
+
+
+Rosenberg                Expires 20 January 2024               [Page 20]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+11.2.  Spam Prevention
+
+   The main security worry is that of a malicious messaging provider
+   whose primary interest is the generation of spam.  To generate that
+   spam to different users, this malicious messaging provider would take
+   a list of email addresses and phone numbers - all of which are
+   readily obtained - and run a high volume of mapping request
+   operations to obtain an SSI for those users.  Using the MIMI
+   protocols, the malicious provider would then spam the user.
+
+   This attack is partly mitigated by the MIMI protocols themselves,
+   whih require a user to agree to a connection request from a new user
+   (NOTE: this is not yet finalized as a feature of the protocols).
+   However, this still enables the spamming of connection requests.
+   These connection requests do convey content - a display name, a user
+   identifier, and sometimes an avatar or perhaps even an initial
+   message.  More than enough to deliver content and thus an appealing
+   vehicle.  The glados protocols provide additional protection from
+   this.
+
+   The protection is accomplished through the several aspects of the
+   glados system.  First, providers cannot invoke mapping request APIs
+   unless they've enrolled.  The enrollment process includes an audit
+   and validation process which ensures the app is a legitimate
+   messaging app.  Should a malicious application anyway pass this gate,
+   there is another protection via rate limiting of mapping request
+   invocations.  These are rate limited based on the number of enrolled
+   users in the application.  A malicious app would need to fake a large
+   number of enrollments to obtain enough rate to usefully spam
+   connection requests.  Glados can additionally use analytics to look
+   for odd patterns in registrations, including clearly fake or
+   genreated email addresses, overlaps with existing email addresses and
+   so on.
+
+   The spam prevention aspects of glados also make it attractive for app
+   providers to enroll, as another form of incentive.
+
+11.3.  Stolen AP Credentials
+
+   In this attack, a malicious AP has obtained credentials - clientiD
+   and secret, or access token, for a valid AP.
+
+   This is prevented in part through normal techniques - encrypted
+   connections for all glados REST API calls for example.
+
+   There is an additional risk - that the clientID and secret and/or
+   access tokens are placed onto the mobile or web application for that
+   provider.  A malicious user might try to reverse engineer the client,
+
+
+
+Rosenberg                Expires 20 January 2024               [Page 21]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   or inspect memory or disk, in order to get access to these secrets.
+   Given the high privelege associated with these APIs, that is a real
+   risk.
+
+   To prevent that, glados adds a requirement for MTLS between the
+   provider and glados.  This makes it impossible to use from a web
+   application.  Though technically possible in a mobile client, it is
+   unlikely that a legitimate provider would ever place such a
+   certificate on a mobile device.  (NOTE: not sure this is really an
+   issue).
+
+12.  Informative References
+
+   [I-D.ietf-mimi-content]
+              Mahy, R., "More Instant Messaging Interoperability (MIMI)
+              message content", Work in Progress, Internet-Draft, draft-
+              ietf-mimi-content-00, 20 June 2023,
+              <https://datatracker.ietf.org/doc/html/draft-ietf-mimi-
+              content-00>.
+
+   [I-D.petithuguenin-vipr-pvp]
+              Petit-Huguenin, M., Rosenberg, J., and C. F. Jennings,
+              "The Public Switched Telephone Network (PSTN) Validation
+              Protocol (PVP)", Work in Progress, Internet-Draft, draft-
+              petithuguenin-vipr-pvp-04, 12 March 2012,
+              <https://datatracker.ietf.org/doc/html/draft-
+              petithuguenin-vipr-pvp-04>.
+
+   [I-D.ralston-mimi-linearized-matrix]
+              Ralston, T. and M. Hodgson, "Linearized Matrix", Work in
+              Progress, Internet-Draft, draft-ralston-mimi-linearized-
+              matrix-02, 26 June 2023,
+              <https://datatracker.ietf.org/doc/html/draft-ralston-mimi-
+              linearized-matrix-02>.
+
+   [I-D.rosenberg-dispatch-vipr-overview]
+              Rosenberg, J., Jennings, C. F., and M. Petit-Huguenin,
+              "Verification Involving PSTN Reachability: Requirements
+              and Architecture Overview", Work in Progress, Internet-
+              Draft, draft-rosenberg-dispatch-vipr-overview-04, 25
+              October 2010, <https://datatracker.ietf.org/doc/html/
+              draft-rosenberg-dispatch-vipr-overview-04>.
+
+   [RFC0954]  Harrenstien, K., Stahl, M., and E. Feinler, "NICNAME/
+              WHOIS", RFC 954, DOI 10.17487/RFC0954, October 1985,
+              <https://www.rfc-editor.org/info/rfc954>.
+
+
+
+
+
+Rosenberg                Expires 20 January 2024               [Page 22]
+
+Internet-Draft                 MIMI GLADOS                     July 2023
+
+
+   [RFC2782]  Gulbrandsen, A., Vixie, P., and L. Esibov, "A DNS RR for
+              specifying the location of services (DNS SRV)", RFC 2782,
+              DOI 10.17487/RFC2782, February 2000,
+              <https://www.rfc-editor.org/info/rfc2782>.
+
+   [RFC3261]  Rosenberg, J., Schulzrinne, H., Camarillo, G., Johnston,
+              A., Peterson, J., Sparks, R., Handley, M., and E.
+              Schooler, "SIP: Session Initiation Protocol", RFC 3261,
+              DOI 10.17487/RFC3261, June 2002,
+              <https://www.rfc-editor.org/info/rfc3261>.
+
+   [RFC3263]  Rosenberg, J. and H. Schulzrinne, "Session Initiation
+              Protocol (SIP): Locating SIP Servers", RFC 3263,
+              DOI 10.17487/RFC3263, June 2002,
+              <https://www.rfc-editor.org/info/rfc3263>.
+
+   [RFC3761]  Faltstrom, P. and M. Mealling, "The E.164 to Uniform
+              Resource Identifiers (URI) Dynamic Delegation Discovery
+              System (DDDS) Application (ENUM)", RFC 3761,
+              DOI 10.17487/RFC3761, April 2004,
+              <https://www.rfc-editor.org/info/rfc3761>.
+
+   [RFC3912]  Daigle, L., "WHOIS Protocol Specification", RFC 3912,
+              DOI 10.17487/RFC3912, September 2004,
+              <https://www.rfc-editor.org/info/rfc3912>.
+
+   [RFC6940]  Jennings, C., Lowekamp, B., Ed., Rescorla, E., Baset, S.,
+              and H. Schulzrinne, "REsource LOcation And Discovery
+              (RELOAD) Base Protocol", RFC 6940, DOI 10.17487/RFC6940,
+              January 2014, <https://www.rfc-editor.org/info/rfc6940>.
+
+Author's Address
+
+   Jonathan Rosenberg
+   Five9
+   Email: jdrosen@jdrosen.net
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Rosenberg                Expires 20 January 2024               [Page 23]
